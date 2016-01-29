@@ -2,3 +2,4 @@ env/*
 sandbox/*
 
 *.pyc
+*.swp

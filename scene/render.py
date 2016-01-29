@@ -6,8 +6,9 @@ import zipfile
 import re
 import shutil
 import multiprocessing
+import time
 
-from utils import WORKING_DIR
+from utils.core import WORKING_DIR
 
 DATA_DIR = os.path.join(WORKING_DIR, 'ShapeNetCore.v1')
 OUTPUT_DIR = os.path.join(WORKING_DIR, 'renders')
@@ -27,12 +28,11 @@ for filename in os.listdir(DATA_DIR):
 
 
 class Image(object):
-  def __init__(self, filepath, scale=None, pos=None, rot=None, tags=None):
+  def __init__(self, filepath, scale=None, pos=None, rot=None):
     self.filepath = filepath
-    self.scale = scale or (1., 1., 1.)
+    self.scale = (scale, scale, scale) if scale else (1., 1., 1.)
     self.pos = pos or (0., 0., 0.)
     self.rot = rot or (0., 0., 0.)
-    self.tags = tags or []
 
   @classmethod
   def generate_random(cls):
@@ -59,7 +59,33 @@ class Image(object):
     )
 
     # return the image
-    return cls(filepath, scale, pos, rot, [])
+    return cls(filepath, scale, pos, rot)
+
+  @classmethod
+  def generate_foreground(cls):
+    model = data[random.randint(0, len(data)-1)]
+    filepath = os.path.join(DATA_DIR, model[0], model[1], 'model.obj')
+    scale = 7.
+    pos = (4., random.normalvariate(0, 2), 0.0)
+    rot = (
+      random.normalvariate(0, 0.5),
+      random.normalvariate(0, 0.5),
+      random.random() * 360
+    )
+    return cls(filepath, scale, pos, rot)
+
+  @classmethod
+  def generate_background(cls):
+    model = data[random.randint(0, len(data)-1)]
+    filepath = os.path.join(DATA_DIR, model[0], model[1], 'model.obj')
+    scale = 10.
+    pos = (-5., random.normalvariate(0, 2), 0.0)
+    rot = (
+      random.normalvariate(0, 0.5),
+      random.normalvariate(0, 0.5),
+      random.random() * 360
+    )
+    return cls(filepath, scale, pos, rot)
 
   def to_string(self):
     result = "Image(filepath='{filepath}', scale={scale}, pos={pos}, rot={rot})".format(
@@ -73,20 +99,20 @@ class Image(object):
 
 
 def render(args):
-  images, img_idx = args
+  images, img_name = args
   # write the render python script
-  output_filepath = os.path.join(OUTPUT_IMAGES, '%d.png' % img_idx)
+  output_filepath = os.path.join(OUTPUT_IMAGES, '%s.png' % img_name)
   with open('template.txt') as f:
     script = f.read().format(
       images=",\n".join(image.to_string() for image in images),
       output_filepath=output_filepath,
     )
-  render_script_filepath = os.path.join(OUTPUT_SCRIPTS, '%d.py' % img_idx)
+  render_script_filepath = os.path.join(OUTPUT_SCRIPTS, '%s.py' % img_name)
   with open(render_script_filepath, 'w') as f:
     f.write(script)
 
   # launch blender
-  outfile = open(os.path.join(OUTPUT_LOGS, '%d.out' % img_idx), 'w')
+  outfile = open(os.path.join(OUTPUT_LOGS, '%s.out' % img_name), 'w')
 
   proc = subprocess.Popen(
     ["blender", "-b", "-P", render_script_filepath],
@@ -97,30 +123,40 @@ def render(args):
   outfile.close()
 
   if err:
-    with open(os.path.join(OUTPUT_LOGS, '%d.err' % img_idx), 'w') as f:
+    with open(os.path.join(OUTPUT_LOGS, '%s.err' % img_name), 'w') as f:
       f.write(err)
 
   # save results into database
   return err
 
 
-def main(n_renders):
-  pool = multiprocessing.Pool(8)
+def render_batch(n_renders, idx_start=0):
+  print "Starting renders %d through %d" % (idx_start, idx_start+n_renders-1)
+  pool = multiprocessing.Pool(multiprocessing.cpu_count())
   args = []
-  for idx in range(n_renders):
-    args.append(([Image.generate_random(), Image.generate_random()], idx))
+  for idx in range(idx_start, idx_start+n_renders):
+    foreground = Image.generate_foreground()
+    background = Image.generate_background()
+    args.append(([foreground, background], '%d_a' % idx))
+    args.append(([background], '%d_b' % idx))
+    args.append(([foreground], '%d_c' % idx))
   errors = pool.map(render, args)
 
   if any(errors):
     for idx, err in enumerate(errors):
       if err:
-        print "Task %d threw an error; you may want to examine the logs" % idx
+        print "Task %d threw an error; you may want to examine the logs" % (idx + idx_start)
         # Errors aren't always fatal and sometimes lead to working renders
   else:
-    print "All renders succeeded"
+    print "Renders %d through %d succeeded" % (idx_start, idx_start+n_renders-1)
 
 
 if __name__ == '__main__':
-  n_renders = multiprocessing.cpu_count()
-  main(n_renders)
+  idx_start = 0
+  batch_size = 100
 
+  while True:
+    render_batch(batch_size, idx_start)
+    idx_start += batch_size
+
+    time.sleep(5)
