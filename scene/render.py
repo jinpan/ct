@@ -16,6 +16,11 @@ OUTPUT_SCRIPTS = os.path.join(OUTPUT_DIR, 'scripts')
 OUTPUT_IMAGES = os.path.join(OUTPUT_DIR, 'images')
 OUTPUT_LOGS = os.path.join(OUTPUT_DIR, 'logs')
 
+OCCLUSION_NONE = 1
+OCCLUSION_LIGHT = 2
+OCCLUSION_HEAVY = 3
+OCCLUSION_FULL = 4
+
 
 data = []
 # TODO: get this information from the metadata
@@ -62,30 +67,48 @@ class Image(object):
     return cls(filepath, scale, pos, rot)
 
   @classmethod
-  def generate_foreground(cls):
-    model = data[random.randint(0, len(data)-1)]
-    filepath = os.path.join(DATA_DIR, model[0], model[1], 'model.obj')
-    scale = 7.
-    pos = (4., random.normalvariate(0, 2), 0.0)
-    rot = (
+  def generate_foreground_background(cls, occlusion):
+    f_model = data[random.randint(0, len(data)-1)]
+    f_filepath = os.path.join(DATA_DIR, model[0], model[1], 'model.obj')
+    f_scale = 7.
+    f_rot = (
       random.normalvariate(0, 0.5),
       random.normalvariate(0, 0.5),
       random.random() * 360
     )
-    return cls(filepath, scale, pos, rot)
 
-  @classmethod
-  def generate_background(cls):
-    model = data[random.randint(0, len(data)-1)]
-    filepath = os.path.join(DATA_DIR, model[0], model[1], 'model.obj')
-    scale = 10.
-    pos = (-5., random.normalvariate(0, 2), 0.0)
-    rot = (
+    b_model = data[random.randint(0, len(data)-1)]
+    b_filepath = os.path.join(DATA_DIR, model[0], model[1], 'model.obj')
+    b_scale = 10.
+    b_rot = (
       random.normalvariate(0, 0.5),
       random.normalvariate(0, 0.5),
       random.random() * 360
     )
-    return cls(filepath, scale, pos, rot)
+
+    if occlusion == OCCLUSION_NONE:
+      if random.choice((0, 1)):
+        y1, y2 = 3., -3.
+      else:
+        y1, y2 = -3., 3.
+    else if occlusion == OCCLUSION_LIGHT:
+      while True:
+        y1, y2 = random.normalvariate(0, 2), random.normalvariate(0, 2)
+        if abs(y1-y2) > 2: break
+    else if occlusion == OCCLUSION_HEAVY:
+      while True:
+        y1, y2 = random.normalvariate(0, 2), random.normalvariate(0, 2)
+        if abs(y1-y2) < 2: break
+    else if occlusion == OCCLUSION_FULL:
+      y1, y2 = 0., 0.
+
+    f_pos = (4., y1, 0.)
+    b_pos = (-5., y2, 0.)
+    foreground = cls(f_filepath, f_scale, f_pos, f_rot)
+    background = cls(b_filepath, b_scale, b_pos, b_rot)
+
+    return foreground, background
+
 
   def to_string(self):
     result = "Image(filepath='{filepath}', scale={scale}, pos={pos}, rot={rot})".format(
